@@ -25,7 +25,7 @@ def dashboard_profesional(request):
     if not tenant:
         if request.user.is_authenticated and request.user.is_superuser:
             return redirect("/admin/")
-        return custom_login_view(request)
+        return redirect("login")
 
     clientes = Cliente.objects.filter(profesional=tenant)
 
