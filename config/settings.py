@@ -20,8 +20,7 @@ SECRET_KEY = 'django-insecure-qn5+nqq1=y96n!15nn4q$k$fg%8^d!^z0pdvcz!(szw)=rn+ll
 
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = ['turnos-saas.onrender.com', 'localhost', '127.0.0.1']
 
 
 INSTALLED_APPS = [
