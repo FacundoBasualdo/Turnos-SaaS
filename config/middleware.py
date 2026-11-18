@@ -1,4 +1,4 @@
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from apps.tenants.models import Profesional
 
 
@@ -8,10 +8,16 @@ class TenantMiddleware:
     self.get_response = get_response
 
   def __call__(self, request):
+    if request.path.startswith("/admin/"):
+      request.tenant = None
+      return self.get_response(request)
+
     host = request.get_host().split(":")[0]
     parts = host.split(".")
 
-    if len(parts) > 2 or (len(parts) == 2 and parts[1] != "localhost"):
+    if "onrender.com" in host or host in ["localhost", "127.0.0.1"]:
+      request.tenant = None
+    elif len(parts) > 2 or (len(parts) == 2 and parts[1] != "localhost"):
       subdominio = parts[0]
 
       if subdominio not in ["www", "admin", "localhost"]:
@@ -19,8 +25,6 @@ class TenantMiddleware:
           tenant = Profesional.objects.get(subdominio=subdominio)
 
           if not tenant.esta_activo():
-            from django.http import HttpResponse
-
             return HttpResponse(
                 "<h1>Tu suscripción ha vencido</h1><p>Por favor realiza el"
                 " pago para reactivar tu cuenta.</p>",
@@ -33,7 +37,7 @@ class TenantMiddleware:
       else:
         request.tenant = None
     else:
-      request.tenant = None  
+      request.tenant = None
 
     response = self.get_response(request)
     return response
