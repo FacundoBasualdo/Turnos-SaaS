@@ -396,7 +396,7 @@ x-data="{
                         this.mostrarToast(data.mensaje || '¡Cliente registrado!');
                     }
                 } else {
-                    alert('Error al guardar el paciente.');
+                    alert('Error al guardar el cliente.');
                 }
             } catch (error) {
                 console.error('Error:', error);
@@ -451,7 +451,7 @@ x-data="{
                 if (data.success) {
                     this.recargarConToast(data.mensaje);
                 } else {
-                    alert('Error al actualizar el paciente.');
+                    alert('Error al actualizar el cliente.');
                     this.guardando = false;
                 }
             } catch (error) {
@@ -697,7 +697,7 @@ x-data="{
                     </div>
 
                     <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-0.5">
-                        <input type="text" x-model="busquedaProximos" @input="paginaProximos = 1" placeholder="🔍 Filtrar paciente..."
+                        <input type="text" x-model="busquedaProximos" @input="paginaProximos = 1" placeholder="🔍 Filtrar cliente..."
                                class="w-full sm:flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 sm:py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
                         
                         <div class="grid grid-cols-2 sm:flex items-center gap-2">
@@ -830,7 +830,7 @@ x-data="{
 
                     <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-0.5">
                         <div class="flex items-center gap-1.5 flex-1">
-                            <input type="text" x-model="busquedaHistorial" @input="paginaHistorial = 1" placeholder="🔍 Filtrar paciente..."
+                            <input type="text" x-model="busquedaHistorial" @input="paginaHistorial = 1" placeholder="🔍 Filtrar cliente..."
                                    class="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 sm:py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
                             
                             <select x-model="filtroHistorialEstado" @change="paginaHistorial = 1"
@@ -969,7 +969,7 @@ x-data="{
                     </div>
                     <div>
                         <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-1">Motivo / Descripción (Opcional)</label>
-                        <textarea x-model="turnoEstadoRapido.descripcion" :disabled="guardando" rows="2" placeholder="Ej: Se pasa por pedido del paciente..."
+                        <textarea x-model="turnoEstadoRapido.descripcion" :disabled="guardando" rows="2" placeholder="Ej: Se pasa por pedido del cliente..."
                                   class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none resize-none"></textarea>
                     </div>
                 </div>
@@ -998,10 +998,10 @@ x-data="{
             <form id="formCrearTurno" @submit.prevent="guardarTurnoNuevo()" class="space-y-2.5 sm:space-y-4">
                 {% csrf_token %}
                 <div>
-                    <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Seleccionar Paciente</label>
+                    <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Seleccionar Cliente</label>
                     <div class="flex gap-2">
                         <select id="select-cliente-turno" name="cliente_id" x-model="clienteTurnoId" required class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
-                            <option value="">-- Seleccione un paciente --</option>
+                            <option value="">-- Seleccione un cliente --</option>
                             {% for cliente in clientes %}
                             <option value="{{ cliente.id }}">{{ cliente.apellido }}, {{ cliente.nombre }}</option>
                             {% endfor %}
@@ -1044,7 +1044,7 @@ x-data="{
     <div x-show="modalDetalleClienteAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-start pt-3 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-50 overflow-y-auto" style="display: none;">
         <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-4 sm:p-6 relative sm:my-auto" @click.away="if(!guardando) modalDetalleClienteAbierto = false">
             <div class="flex justify-between items-center mb-2 sm:mb-3">
-                <h3 class="text-base sm:text-lg font-bold text-slate-900">Detalle del Paciente</h3>
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Detalle del Cliente</h3>
                 <button :disabled="guardando" @click="modalDetalleClienteAbierto = false" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">&times;</button>
             </div>
 
@@ -1120,7 +1120,7 @@ x-data="{
 
             <form @submit.prevent="guardarTurnoEditado()" class="space-y-2 sm:space-y-3.5">
                 <div>
-                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Paciente</label>
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Cliente</label>
                     <input type="text" x-model="turnoSeleccionado.cliente_nombre" disabled 
                            class="w-full border border-dashed border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-slate-100/80 text-slate-500 opacity-75 outline-none cursor-not-allowed">
                 </div>
@@ -1220,7 +1220,7 @@ x-data="{
     <div x-show="modalClienteAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] flex items-start pt-3 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-[9999] overflow-y-auto" style="display: none;">
         <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-4 sm:p-6 sm:my-auto" @click.away.stop="if(!guardando) modalClienteAbierto = false">
             <div class="flex justify-between items-center mb-2.5 sm:mb-4">
-                <h3 class="text-base sm:text-lg font-bold text-slate-900">Crear Nuevo Paciente</h3>
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Crear Nuevo Cliente</h3>
                 <button type="button" :disabled="guardando" @click.stop="modalClienteAbierto = false" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">&times;</button>
             </div>
             <form @submit.prevent="guardarClienteNuevo($el)" class="space-y-2.5 sm:space-y-4">
@@ -1247,7 +1247,7 @@ x-data="{
                     <button type="button" :disabled="guardando" @click.stop="modalClienteAbierto = false" class="px-3.5 py-1.5 sm:py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-medium">Cancelar</button>
                     <button type="submit" :disabled="guardando" 
                             class="bg-indigo-600 text-white px-4 py-1.5 sm:py-2 rounded-xl hover:bg-indigo-700 text-xs sm:text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition"
-                            x-text="guardando ? 'Guardando...' : 'Guardar Paciente'">
+                            x-text="guardando ? 'Guardando...' : 'Guardar Cliente'">
                     </button>
                 </div>
             </form>
