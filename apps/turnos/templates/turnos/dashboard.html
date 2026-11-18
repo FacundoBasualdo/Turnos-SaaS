@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de {{ tenant.nombre_negocio }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 overflow-x-hidden" 
+x-data="{
+        guardando: false,
+        toastMensaje: '',
+        toastTipo: 'success',
+        toastVisible: false,
+        nuevaFechaHora: '',
+        clienteTurnoId: '',
+
+        menuClientesMobileAbierto: false,
+        avisoEdicionCliente: false,
+        avisoEdicionTurno: false,
+
+        turnosLista: [
+            {% for turno in turnos %}
+            {
+                id: '{{ turno.id }}',
+                fecha_hora: '{{ turno.fecha_hora|date:"Y-m-d\TH:i" }}',
+                fecha_display: '{{ turno.fecha_hora|date:"d/m/Y H:i" }}',
+                fecha_solo: '{{ turno.fecha_hora|date:"Y-m-d" }}',
+                cliente_id: '{{ turno.cliente.id }}',
+                cliente_nombre: '{{ turno.cliente.apellido|escapejs }}, {{ turno.cliente.nombre|escapejs }}',
+                descripcion: '{{ turno.descripcion|default:""|escapejs }}',
+                estado: '{{ turno.estado }}',
+                estado_display: '{{ turno.get_estado_display|escapejs }}'
+            }{% if not forloop.last %},{% endif %}
+            {% endfor %}
+        ],
+
+        filtroProximosRango: 'hoy', // 'hoy' | 'manana' | '7dias' | 'todos' | 'personalizado'
+        proximosDesde: '',
+        proximosHasta: '',
+        busquedaProximos: '',
+        paginaProximos: 1,
+
+        filtroHistorialRango: 'todos', // 'todos' | 'hoy' | 'ayer' | '7dias' | 'mes' | 'personalizado'
+        filtroHistorialEstado: 'todos', // 'todos' | 'completado' | 'ausente' | 'cancelado'
+        historialDesde: '',
+        historialHasta: '',
+        busquedaHistorial: '',
+        paginaHistorial: 1,
+
+        porPagina: 10,
+
+        formatearISO(dateObj) {
+            const pad = (n) => String(n).padStart(2, '0');
+            return `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}`;
+        },
+
+        get hoyISO() {
+            return this.formatearISO(new Date());
+        },
+
+        get mananaISO() {
+            const d = new Date();
+            d.setDate(d.getDate() + 1);
+            return this.formatearISO(d);
+        },
+
+        get ayerISO() {
+            const d = new Date();
+            d.setDate(d.getDate() - 1);
+            return this.formatearISO(d);
+        },
+
+        get en7DiasISO() {
+            const d = new Date();
+            d.setDate(d.getDate() + 7);
+            return this.formatearISO(d);
+        },
+
+        get hace7DiasISO() {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            return this.formatearISO(d);
+        },
+
+        get inicioMesISO() {
+            const d = new Date();
+            d.setDate(1);
+            return this.formatearISO(d);
+        },
+
+        get proximosFiltrados() {
+            const q = this.busquedaProximos.trim().toLowerCase();
+            return this.turnosLista
+                .filter(t => {
+                    if (t.estado !== 'pendiente' && t.estado !== 'reprogramado') return false;
+
+                    if (q && !t.cliente_nombre.toLowerCase().includes(q) && !t.descripcion.toLowerCase().includes(q)) {
+                        return false;
+                    }
+
+                    if (this.proximosDesde || this.proximosHasta) {
+                        if (this.proximosDesde && t.fecha_solo < this.proximosDesde) return false;
+                        if (this.proximosHasta && t.fecha_solo > this.proximosHasta) return false;
+                        return true;
+                    }
+
+                    if (this.filtroProximosRango === 'hoy') return t.fecha_solo === this.hoyISO;
+                    if (this.filtroProximosRango === 'manana') return t.fecha_solo === this.mananaISO;
+                    if (this.filtroProximosRango === '7dias') return t.fecha_solo >= this.hoyISO && t.fecha_solo <= this.en7DiasISO;
+                    return true;
+                })
+                .sort((a, b) => a.fecha_hora.localeCompare(b.fecha_hora));
+        },
+
+        get totalPaginasProximos() {
+            return Math.max(1, Math.ceil(this.proximosFiltrados.length / this.porPagina));
+        },
+
+        get proximosPaginados() {
+            const inicio = (this.paginaProximos - 1) * this.porPagina;
+            return this.proximosFiltrados.slice(inicio, inicio + this.porPagina);
+        },
+
+        cambiarRangoProximos(rango) {
+            this.filtroProximosRango = rango;
+            this.proximosDesde = '';
+            this.proximosHasta = '';
+            this.paginaProximos = 1;
+        },
+
+        limpiarFechasProximos() {
+            this.proximosDesde = '';
+            this.proximosHasta = '';
+            this.filtroProximosRango = 'hoy';
+            this.paginaProximos = 1;
+        },
+
+        get historialFiltrado() {
+            const q = this.busquedaHistorial.trim().toLowerCase();
+            return this.turnosLista
+                .filter(t => {
+                    if (t.estado !== 'completado' && t.estado !== 'ausente' && t.estado !== 'cancelado') return false;
+
+                    if (this.filtroHistorialEstado !== 'todos' && t.estado !== this.filtroHistorialEstado) {
+                        return false;
+                    }
+
+                    if (q && !t.cliente_nombre.toLowerCase().includes(q) && !t.descripcion.toLowerCase().includes(q)) {
+                        return false;
+                    }
+
+                    if (this.historialDesde || this.historialHasta) {
+                        if (this.historialDesde && t.fecha_solo < this.historialDesde) return false;
+                        if (this.historialHasta && t.fecha_solo > this.historialHasta) return false;
+                        return true;
+                    }
+
+                    if (this.filtroHistorialRango === 'hoy') return t.fecha_solo === this.hoyISO;
+                    if (this.filtroHistorialRango === 'ayer') return t.fecha_solo === this.ayerISO;
+                    if (this.filtroHistorialRango === '7dias') return t.fecha_solo >= this.hace7DiasISO && t.fecha_solo <= this.hoyISO;
+                    if (this.filtroHistorialRango === 'mes') return t.fecha_solo >= this.inicioMesISO && t.fecha_solo <= this.hoyISO;
+                    return true;
+                })
+                .sort((a, b) => b.fecha_hora.localeCompare(a.fecha_hora));
+        },
+
+        get totalPaginasHistorial() {
+            return Math.max(1, Math.ceil(this.historialFiltrado.length / this.porPagina));
+        },
+
+        get historialPaginado() {
+            const inicio = (this.paginaHistorial - 1) * this.porPagina;
+            return this.historialFiltrado.slice(inicio, inicio + this.porPagina);
+        },
+
+        cambiarRangoHistorial(rango) {
+            this.filtroHistorialRango = rango;
+            this.historialDesde = '';
+            this.historialHasta = '';
+            this.paginaHistorial = 1;
+        },
+
+        limpiarFechasHistorial() {
+            this.historialDesde = '';
+            this.historialHasta = '';
+            this.filtroHistorialRango = 'todos';
+            this.paginaHistorial = 1;
+        },
+
+        paginasVisibles(actual, total) {
+            const maxBotones = 5;
+            let inicio = Math.max(1, actual - Math.floor(maxBotones / 2));
+            let fin = Math.min(total, inicio + maxBotones - 1);
+            if (fin - inicio + 1 < maxBotones) {
+                inicio = Math.max(1, fin - maxBotones + 1);
+            }
+            const arr = [];
+            for (let i = inicio; i <= fin; i++) arr.push(i);
+            return arr;
+        },
+
+        init() {
+            const mensajeGuardado = sessionStorage.getItem('toastPendiente');
+            if (mensajeGuardado) {
+                sessionStorage.removeItem('toastPendiente');
+                this.mostrarToast(mensajeGuardado);
+            }
+        },
+
+        mostrarToast(mensaje, tipo = 'success') {
+            this.toastMensaje = mensaje;
+            this.toastTipo = tipo;
+            this.toastVisible = true;
+            setTimeout(() => {
+                this.toastVisible = false;
+            }, 4500);
+        },
+
+        recargarConToast(mensaje) {
+            sessionStorage.setItem('toastPendiente', mensaje);
+            location.reload();
+        },
+
+        notificarBloqueoCliente() {
+            if (!this.editandoCliente) {
+                this.avisoEdicionCliente = true;
+                setTimeout(() => { this.avisoEdicionCliente = false; }, 2500);
+            }
+        },
+
+        notificarBloqueoTurno() {
+            if (!this.editandoTurno) {
+                this.avisoEdicionTurno = true;
+                setTimeout(() => { this.avisoEdicionTurno = false; }, 2500);
+            }
+        },
+
+        ajustarFechaHora(valorActual, deltaMinutos) {
+            let fecha = valorActual ? new Date(valorActual) : new Date();
+            if (isNaN(fecha.getTime())) fecha = new Date();
+            if (!valorActual) {
+                fecha.setMinutes(0, 0, 0);
+            }
+            fecha.setMinutes(fecha.getMinutes() + deltaMinutos);
+
+            const pad = (n) => String(n).padStart(2, '0');
+            return `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())}T${pad(fecha.getHours())}:${pad(fecha.getMinutes())}`;
+        },
+
+        searchPaciente: '', 
+        
+        modalClienteAbierto: false,        
+        modalTurnoAbierto: false,          
+        modalDetalleClienteAbierto: false, 
+        modalTurnoDetalleAbierto: false,   
+
+        modalEstadoRapidoAbierto: false,
+        turnoEstadoRapido: { id: '', cliente_nombre: '', estado: '', estadoOriginal: '', fecha_hora: '', descripcion: '' },
+
+        clienteSeleccionado: { id: '', nombre: '', apellido: '', telefono: '', correo: '' },
+        clienteOriginal: { id: '', nombre: '', apellido: '', telefono: '', correo: '' },
+        editandoCliente: false,
+
+        turnoSeleccionado: { id: '', fecha_hora: '', cliente_nombre: '', descripcion: '', estado: '' },
+        turnoOriginal: { id: '', fecha_hora: '', cliente_nombre: '', descripcion: '', estado: '' },
+        editandoTurno: false,
+
+        modalConfirmarFinalizarAbierto: false,
+        turnoIdAFinalizar: null,
+        modalConfirmarEliminarAbierto: false,
+        turnoIdAEliminar: null,
+        
+        abrirDetalleCliente(cliente) {
+            this.clienteSeleccionado = { ...cliente };
+            this.clienteOriginal = { ...cliente };
+            this.editandoCliente = false;
+            this.avisoEdicionCliente = false;
+            this.menuClientesMobileAbierto = false;
+            this.modalDetalleClienteAbierto = true;
+        },
+
+        agendarTurnoParaCliente() {
+            this.clienteTurnoId = String(this.clienteSeleccionado.id);
+            this.nuevaFechaHora = '';
+            this.modalDetalleClienteAbierto = false;
+            this.modalTurnoAbierto = true;
+        },
+
+        abrirTurno(turno) {
+            this.turnoSeleccionado = { ...turno };
+            this.turnoOriginal = { ...turno };
+            this.editandoTurno = false;
+            this.avisoEdicionTurno = false;
+            this.modalTurnoDetalleAbierto = true;
+        },
+
+        abrirCambioEstadoRapido(turno) {
+            this.turnoEstadoRapido = {
+                id: turno.id,
+                cliente_nombre: turno.cliente_nombre,
+                estado: turno.estado,
+                estadoOriginal: turno.estado,
+                fecha_hora: turno.fecha_hora || '',
+                descripcion: turno.descripcion || ''
+            };
+            this.modalEstadoRapidoAbierto = true;
+        },
+
+        confirmarFinalizar(id, event) {
+            event.stopPropagation();
+            this.turnoIdAFinalizar = id;
+            this.modalConfirmarFinalizarAbierto = true;
+        },
+
+        abrirConfirmacionEliminar() {
+            this.turnoIdAEliminar = this.turnoSeleccionado.id;
+            this.modalTurnoDetalleAbierto = false; 
+            this.modalConfirmarEliminarAbierto = true; 
+        },
+
+        get hayCambiosCliente() {
+            return JSON.stringify(this.clienteSeleccionado) !== JSON.stringify(this.clienteOriginal);
+        },
+
+        get hayCambiosTurno() {
+            return JSON.stringify(this.turnoSeleccionado) !== JSON.stringify(this.turnoOriginal);
+        },
+
+        saltarALetra(letra) {
+            const elemento = document.getElementById('paciente-item-' + letra);
+            if (elemento) {
+                elemento.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        },
+
+        async guardarEstadoRapido() {
+            if (this.guardando) return;
+            this.guardando = true;
+
+            let params = {
+                'estado': this.turnoEstadoRapido.estado,
+                'csrfmiddlewaretoken': '{{ csrf_token }}'
+            };
+
+            if (this.turnoEstadoRapido.estado === 'reprogramado') {
+                params['fecha_hora'] = this.turnoEstadoRapido.fecha_hora;
+                params['descripcion'] = this.turnoEstadoRapido.descripcion;
+            }
+
+            try {
+                let response = await fetch(`/turnos/${this.turnoEstadoRapido.id}/editar/`, {
+                    method: 'POST',
+                    body: new URLSearchParams(params),
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                });
+                let data = await response.json();
+                if (data.success) {
+                    this.recargarConToast(data.mensaje);
+                } else {
+                    alert('Error al actualizar el turno.');
+                    this.guardando = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                this.guardando = false;
+            }
+        },
+
+        async guardarClienteNuevo(formEl) {
+            if (this.guardando) return;
+            this.guardando = true;
+            let formData = new FormData(formEl);
+
+            try {
+                let response = await fetch('{% url "crear_cliente_ajax" %}', {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+                });
+                let data = await response.json();
+                if (data.success) {
+                    let select = document.getElementById('select-cliente-turno');
+                    if (select) {
+                        let nuevaOption = new Option(data.cliente_texto, data.cliente_id, true, true);
+                        select.add(nuevaOption);
+                    }
+                    this.clienteTurnoId = String(data.cliente_id);
+                    this.modalClienteAbierto = false;
+                    formEl.reset();
+                    if (!this.modalTurnoAbierto) {
+                        this.recargarConToast(data.mensaje || '¡Cliente registrado con éxito!');
+                        return;
+                    } else {
+                        this.mostrarToast(data.mensaje || '¡Cliente registrado!');
+                    }
+                } else {
+                    alert('Error al guardar el paciente.');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            } finally {
+                if (this.modalTurnoAbierto || !this.modalClienteAbierto) {
+                    this.guardando = false;
+                }
+            }
+        },
+
+        async guardarTurnoNuevo() {
+            if (this.guardando) return;
+            this.guardando = true;
+            let form = document.getElementById('formCrearTurno');
+            let formData = new FormData(form);
+
+            try {
+                let response = await fetch('{% url "crear_turno_ajax" %}', {
+                    method: 'POST',
+                    body: formData,
+                    headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+                });
+                let data = await response.json();
+                if (data.success) {
+                    this.recargarConToast(data.mensaje);
+                } else {
+                    alert('Error al agendar el turno.');
+                    this.guardando = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                this.guardando = false;
+            }
+        },
+
+        async guardarClienteExistente() {
+            if (this.guardando) return;
+            this.guardando = true;
+            let formData = new FormData();
+            formData.append('nombre', this.clienteSeleccionado.nombre);
+            formData.append('apellido', this.clienteSeleccionado.apellido);
+            formData.append('telefono', this.clienteSeleccionado.telefono);
+            formData.append('correo', this.clienteSeleccionado.correo);
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            try {
+                let response = await fetch(`/clientes/${this.clienteSeleccionado.id}/editar/`, {
+                    method: 'POST',
+                    body: formData
+                });
+                let data = await response.json();
+                if (data.success) {
+                    this.recargarConToast(data.mensaje);
+                } else {
+                    alert('Error al actualizar el paciente.');
+                    this.guardando = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                this.guardando = false;
+            }
+        },
+
+        async guardarTurnoEditado() {
+            if (this.guardando) return;
+            this.guardando = true;
+            let formData = new FormData();
+            formData.append('fecha_hora', this.turnoSeleccionado.fecha_hora);
+            formData.append('descripcion', this.turnoSeleccionado.descripcion);
+            formData.append('estado', this.turnoSeleccionado.estado);
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            try {
+                let response = await fetch(`/turnos/${this.turnoSeleccionado.id}/editar/`, {
+                    method: 'POST',
+                    body: formData
+                });
+                let data = await response.json();
+                if (data.success) {
+                    this.recargarConToast(data.mensaje);
+                } else {
+                    alert('Error al actualizar el turno.');
+                    this.guardando = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                this.guardando = false;
+            }
+        },
+
+        async completarTurnoRapido(id) {
+            if (this.guardando) return;
+            this.guardando = true;
+            try {
+                let response = await fetch(`/turnos/${id}/editar/`, {
+                    method: 'POST',
+                    body: new URLSearchParams({
+                        'estado': 'completado',
+                        'csrfmiddlewaretoken': '{{ csrf_token }}'
+                    }),
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                });
+                let data = await response.json();
+                if (data.success) {
+                    this.recargarConToast(data.mensaje);
+                } else {
+                    this.guardando = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                this.guardando = false;
+            }
+        },
+
+        async ejecutarFinalizacionDirecta() {
+            if (this.guardando) return;
+            this.guardando = true;
+            try {
+                let response = await fetch(`/turnos/${this.turnoIdAFinalizar}/editar/`, {
+                    method: 'POST',
+                    body: new URLSearchParams({
+                        'estado': 'completado',
+                        'csrfmiddlewaretoken': '{{ csrf_token }}'
+                    }),
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                });
+                let data = await response.json();
+                if (data.success) {
+                    this.recargarConToast(data.mensaje);
+                } else {
+                    this.guardando = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                this.guardando = false;
+            }
+        },
+
+        async ejecutarEliminacionDefinitiva() {
+            if (this.guardando) return;
+            this.guardando = true;
+            let formData = new FormData();
+            formData.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            try {
+                let response = await fetch(`/turnos/${this.turnoIdAEliminar}/eliminar/`, {
+                    method: 'POST',
+                    body: formData
+                });
+                let data = await response.json();
+                if (data.success) {
+                    this.recargarConToast(data.mensaje);
+                } else {
+                    alert('Error al eliminar el turno.');
+                    this.guardando = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                this.guardando = false;
+            }
+        }
+      }">
+          
+    <nav class="bg-indigo-600 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-2 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <h1 class="text-lg sm:text-xl font-bold tracking-tight ml-1 sm:ml-2 truncate max-w-[200px] sm:max-w-none">{{ tenant.nombre_negocio }}</h1>
+            </div>
+            <div>
+                <form action="{% url 'logout' %}" method="post" class="inline">
+                    {% csrf_token %}
+                    <button type="submit" class="text-xs sm:text-sm bg-indigo-700 hover:bg-indigo-800 text-white px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5 shadow-sm">
+                        Cerrar Sesión
+                    </button>
+                </form>
+            </div>
+        </div>
+    </nav>
+
+    {% if dias_restantes is not None and dias_restantes <= 5 and dias_restantes >= 0 %}
+    <div class="max-w-7xl mx-auto px-4 pt-3">
+        <div class="bg-amber-50 border-l-4 border-amber-500 p-3 rounded-r-xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <p class="text-xs text-amber-800 font-medium">
+                ⚠️ Tu suscripción vence en <strong class="font-bold">{{ dias_restantes }} días</strong>. Evitá la interrupción del servicio renovando a tiempo.
+            </p>
+            <a href="#" class="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition whitespace-nowrap self-start sm:self-auto">Renovar Ahora</a>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="lg:hidden max-w-7xl mx-auto px-4 pt-3">
+        <div class="bg-white p-2 rounded-2xl shadow-sm border border-slate-200/80 grid grid-cols-3 gap-2">
+            <button type="button" @click="menuClientesMobileAbierto = true"
+                    class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 px-1 rounded-xl text-center transition flex flex-col items-center justify-center gap-0.5">
+                <span class="text-base">👥</span>
+                <span>Clientes ({{ clientes|length }})</span>
+            </button>
+            <button type="button" @click="modalClienteAbierto = true"
+                    class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold py-2 px-1 rounded-xl text-center transition flex flex-col items-center justify-center gap-0.5">
+                <span class="text-base">➕</span>
+                <span>Nuevo Cliente</span>
+            </button>
+            <button type="button" @click="clienteTurnoId = ''; nuevaFechaHora = ''; modalTurnoAbierto = true"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2 px-1 rounded-xl text-center transition shadow-sm flex flex-col items-center justify-center gap-0.5">
+                <span class="text-base">📅</span>
+                <span>Agendar Turno</span>
+            </button>
+        </div>
+    </div>
+
+    <div x-show="menuClientesMobileAbierto"
+         x-transition.opacity
+         @click="menuClientesMobileAbierto = false"
+         class="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] z-40 lg:hidden"
+         style="display: none;"></div>
+    
+    <main class="max-w-7xl mx-auto px-4 py-2 pb-10 grid grid-cols-1 lg:grid-cols-3 gap-2">
+        
+        <div :class="menuClientesMobileAbierto ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+             class="fixed inset-y-0 left-0 z-50 w-[86%] max-w-sm bg-slate-100 p-3 overflow-y-auto shadow-2xl transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-auto lg:max-w-none lg:bg-transparent lg:p-0 lg:overflow-visible lg:shadow-none space-y-2 lg:space-y-1">
+            
+            <div class="flex items-center justify-between lg:hidden bg-white px-3.5 py-2.5 rounded-2xl shadow-sm border border-slate-200/80">
+                <span class="text-sm font-bold text-slate-800">Directorio de Clientes</span>
+                <button type="button" @click="menuClientesMobileAbierto = false" class="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none px-1">&times;</button>
+            </div>
+
+            <div class="hidden lg:flex bg-white p-2 rounded-2xl shadow-sm border border-slate-200/80 items-center gap-3">
+                <button type="button" @click="modalClienteAbierto = true" class="flex-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold p-1 rounded-xl text-center transition flex flex-col items-center gap-1">
+                    <span class="text-base">➕</span> Nuevo Cliente
+                </button>
+                <button type="button" @click="clienteTurnoId = ''; nuevaFechaHora = ''; modalTurnoAbierto = true" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold p-1 rounded-xl text-center transition shadow-sm flex flex-col items-center gap-1">
+                    <span class="text-base">📅</span> Agendar Turno
+                </button>
+            </div>
+
+            <div class="bg-white p-3 rounded-2xl shadow-sm border border-slate-200/80">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-sm font-bold uppercase tracking-wider text-slate-400">Mis Clientes</h2>
+                    <span class="text-xs bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-full font-medium">{{ clientes|length }} total</span>
+                </div>
+
+                <div class="mb-2">
+                    <input type="text" x-model="searchPaciente" placeholder="🔍 Buscar por nombre o teléfono..." 
+                           class="w-full text-xs border border-slate-200 rounded-xl px-3.5 py-2.5 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                </div>
+
+                <div class="flex gap-2 relative">
+                    <ul class="divide-y divide-slate-100 h-[calc(100dvh-210px)] lg:h-96 overflow-y-auto pr-2 space-y-1 w-full">
+                        {% for cliente in clientes %}
+                        <li id="paciente-item-{{ cliente.apellido|slice:':1'|upper }}"
+                            @click="abrirDetalleCliente({ id: '{{ cliente.id }}', nombre: '{{ cliente.nombre|escapejs }}', apellido: '{{ cliente.apellido|escapejs }}', telefono: '{{ cliente.telefono|default:""|escapejs }}', correo: '{{ cliente.correo|default:""|escapejs }}' })"
+                            class="py-1.5 lg:py-1 px-3 rounded-xl hover:bg-indigo-50/60 cursor-pointer transition group"
+                            x-show="searchPaciente === '' || '{{ cliente.nombre|lower|escapejs }} {{ cliente.apellido|lower|escapejs }} {{ cliente.telefono|escapejs }}'.includes(searchPaciente.toLowerCase())">
+                            <p class="font-semibold text-slate-900 text-sm group-hover:text-indigo-600 transition">{{ cliente.apellido }}, {{ cliente.nombre }}</p>
+                            <p class="text-slate-400 text-xs flex items-center gap-1 mt-0.5">📞 {{ cliente.telefono|default:"Sin teléfono" }}</p>
+                        </li>
+                        {% empty %}
+                        <p class="text-sm text-slate-500 text-center py-10">No hay clientes registrados.</p>
+                        {% endfor %}
+                    </ul>
+
+                    <div class="flex flex-col justify-between items-center bg-slate-50 py-1.5 px-1 rounded-xl border border-slate-200/60 text-[10px] lg:text-[11px] font-bold text-slate-500 select-none shrink-0">
+                        <template x-for="letra in ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z']">
+                            <button @click="saltarALetra(letra)" 
+                                    class="hover:text-indigo-600 hover:bg-indigo-50 w-4 h-3.5 lg:h-4 rounded flex items-center justify-center transition" 
+                                    x-text="letra"></button>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-2 space-y-4">
+            
+            <div class="bg-white p-3 rounded-2xl shadow-sm border border-slate-200/80">
+                
+                <div class="flex flex-col gap-2 mb-2.5">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-md font-bold text-slate-800">Próximos Turnos</h2>
+                            <span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-semibold" x-text="proximosFiltrados.length"></span>
+                        </div>
+
+                        <div class="flex sm:inline-flex w-full sm:w-auto justify-between bg-slate-100 p-0.5 rounded-lg text-[11px] font-semibold">
+                            <button type="button" @click="cambiarRangoProximos('hoy')"
+                                    :class="filtroProximosRango === 'hoy' && !proximosDesde && !proximosHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2.5 py-1 rounded-md transition">Hoy</button>
+                            <button type="button" @click="cambiarRangoProximos('manana')"
+                                    :class="filtroProximosRango === 'manana' && !proximosDesde && !proximosHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2.5 py-1 rounded-md transition">Mañana</button>
+                            <button type="button" @click="cambiarRangoProximos('7dias')"
+                                    :class="filtroProximosRango === '7dias' && !proximosDesde && !proximosHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2.5 py-1 rounded-md transition">Próx. 7 días</button>
+                            <button type="button" @click="cambiarRangoProximos('todos')"
+                                    :class="filtroProximosRango === 'todos' && !proximosDesde && !proximosHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2.5 py-1 rounded-md transition">Todos</button>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-0.5">
+                        <input type="text" x-model="busquedaProximos" @input="paginaProximos = 1" placeholder="🔍 Filtrar paciente..."
+                               class="w-full sm:flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 sm:py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                        
+                        <div class="grid grid-cols-2 sm:flex items-center gap-2">
+                            <div class="flex items-center gap-1 text-[11px] text-slate-500">
+                                <span class="shrink-0">Desde:</span>
+                                <input type="date" x-model="proximosDesde" @change="filtroProximosRango = 'personalizado'; paginaProximos = 1"
+                                       class="w-full sm:w-auto text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                            <div class="flex items-center gap-1 text-[11px] text-slate-500">
+                                <span class="shrink-0">Hasta:</span>
+                                <input type="date" x-model="proximosHasta" @change="filtroProximosRango = 'personalizado'; paginaProximos = 1"
+                                       class="w-full sm:w-auto text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                        </div>
+
+                        <button x-show="proximosDesde || proximosHasta" @click="limpiarFechasProximos()" class="text-xs text-rose-600 hover:underline font-medium self-end sm:self-auto px-1">Limpiar</button>
+                    </div>
+                </div>
+
+                <div class="md:overflow-x-auto">
+                    <table class="block md:table w-full text-left border-collapse">
+                        <thead class="hidden md:table-header-group">
+                            <tr class="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                <th class="py-3 px-4">Fecha y Hora</th>
+                                <th class="py-3 px-4">Cliente</th>
+                                <th class="py-3 px-4">Descripción</th>
+                                <th class="py-3 px-4 text-right">Estado / Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody class="block md:table-row-group divide-y divide-slate-100 text-sm">
+                            <template x-for="turno in proximosPaginados" :key="turno.id">
+                                <tr class="flex flex-wrap items-center justify-between gap-y-1.5 py-3 px-1 md:p-0 md:table-row hover:bg-indigo-50/50 transition cursor-pointer"
+                                    @click="abrirTurno(turno)">
+                                    
+                                    <td class="order-1 block md:table-cell md:py-3 md:px-4 font-semibold text-slate-900 whitespace-nowrap text-xs md:text-sm"
+                                        x-text="turno.fecha_display">
+                                    </td>
+                                    
+                                    <td class="order-3 w-full md:w-auto block md:table-cell md:py-3 md:px-4 text-slate-800 md:text-slate-700 font-semibold md:font-medium text-sm"
+                                        x-text="turno.cliente_nombre">
+                                    </td>
+                                    
+                                    <td class="order-4 w-full md:w-auto block md:table-cell md:py-3 md:px-4 text-slate-500 text-xs md:max-w-[180px] truncate"
+                                        x-text="turno.descripcion || '-'">
+                                    </td>
+                                    
+                                    <td class="order-2 ml-auto md:ml-0 block md:table-cell md:py-3 md:px-4 text-right whitespace-nowrap">
+                                        <div class="inline-flex items-center justify-end gap-1.5 md:gap-2">
+                                            <button type="button"
+                                                title="Clic para cambiar estado rápido"
+                                                @click.stop="abrirCambioEstadoRapido(turno)"
+                                                :class="{
+                                                    'bg-amber-50 text-amber-700 border border-amber-200/60': turno.estado === 'pendiente',
+                                                    'bg-sky-50 text-sky-700 border border-sky-200/60': turno.estado === 'reprogramado'
+                                                }"
+                                                class="px-2 md:px-2.5 py-1 rounded-full text-[11px] md:text-xs font-semibold tracking-wide inline-flex items-center gap-1 hover:ring-2 hover:ring-indigo-300 transition">
+                                                <span x-text="turno.estado_display"></span>
+                                                <span class="text-[10px] opacity-60">▾</span>
+                                            </button>
+
+                                            <button type="button" 
+                                                :disabled="guardando"
+                                                @click.stop="completarTurnoRapido(turno.id)"
+                                                class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 md:px-2.5 py-1 rounded-lg text-[11px] md:text-xs font-bold transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                                                ✓ <span class="hidden sm:inline">Completar</span>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+
+                            <tr x-show="proximosFiltrados.length === 0" class="block md:table-row">
+                                <td colspan="4" class="block md:table-cell py-8 text-center text-xs text-slate-400">
+                                    No hay turnos pendientes o reprogramados para este filtro.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div x-show="totalPaginasProximos > 1" class="mt-2 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span class="text-slate-400">
+                        Página <strong class="text-slate-700" x-text="paginaProximos"></strong> de <strong class="text-slate-700" x-text="totalPaginasProximos"></strong>
+                    </span>
+                    <div class="inline-flex items-center gap-1">
+                        <button type="button" @click="paginaProximos = Math.max(1, paginaProximos - 1)" :disabled="paginaProximos === 1"
+                                class="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium">
+                            Anterior
+                        </button>
+                        <template x-for="p in paginasVisibles(paginaProximos, totalPaginasProximos)" :key="p">
+                            <button type="button" @click="paginaProximos = p"
+                                    :class="paginaProximos === p ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'"
+                                    class="w-7 h-7 rounded-lg border font-semibold transition"
+                                    x-text="p"></button>
+                        </template>
+                        <button type="button" @click="paginaProximos = Math.min(totalPaginasProximos, paginaProximos + 1)" :disabled="paginaProximos === totalPaginasProximos"
+                                class="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium">
+                            Siguiente
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-3 rounded-2xl shadow-sm border border-slate-200/80">
+                <div class="flex flex-col gap-2 mb-2.5">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <h2 class="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-500">Turnos Gestionados</h2>
+                            <span class="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold" x-text="historialFiltrado.length"></span>
+                        </div>
+
+                        <div class="flex sm:inline-flex w-full sm:w-auto justify-between bg-slate-100 p-0.5 rounded-lg text-[11px] font-semibold">
+                            <button type="button" @click="cambiarRangoHistorial('todos')"
+                                    :class="filtroHistorialRango === 'todos' && !historialDesde && !historialHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2 py-1 rounded-md transition">Todos</button>
+                            <button type="button" @click="cambiarRangoHistorial('hoy')"
+                                    :class="filtroHistorialRango === 'hoy' && !historialDesde && !historialHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2 py-1 rounded-md transition">Hoy</button>
+                            <button type="button" @click="cambiarRangoHistorial('ayer')"
+                                    :class="filtroHistorialRango === 'ayer' && !historialDesde && !historialHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2 py-1 rounded-md transition">Ayer</button>
+                            <button type="button" @click="cambiarRangoHistorial('7dias')"
+                                    :class="filtroHistorialRango === '7dias' && !historialDesde && !historialHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2 py-1 rounded-md transition">Últ. 7d</button>
+                            <button type="button" @click="cambiarRangoHistorial('mes')"
+                                    :class="filtroHistorialRango === 'mes' && !historialDesde && !historialHasta ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+                                    class="flex-1 sm:flex-initial text-center px-2 py-1 rounded-md transition">Mes</button>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-0.5">
+                        <div class="flex items-center gap-1.5 flex-1">
+                            <input type="text" x-model="busquedaHistorial" @input="paginaHistorial = 1" placeholder="🔍 Filtrar paciente..."
+                                   class="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 sm:py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                            
+                            <select x-model="filtroHistorialEstado" @change="paginaHistorial = 1"
+                                    class="text-xs border border-slate-200 rounded-lg px-2 py-1.5 sm:py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none shrink-0">
+                                <option value="todos">Estado: Todos</option>
+                                <option value="completado">Completados</option>
+                                <option value="ausente">Ausentes</option>
+                                <option value="cancelado">Cancelados</option>
+                            </select>
+                        </div>
+
+                        <div class="grid grid-cols-2 sm:flex items-center gap-2">
+                            <div class="flex items-center gap-1 text-[11px] text-slate-500">
+                                <span class="shrink-0">Desde:</span>
+                                <input type="date" x-model="historialDesde" @change="filtroHistorialRango = 'personalizado'; paginaHistorial = 1"
+                                       class="w-full sm:w-auto text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                            <div class="flex items-center gap-1 text-[11px] text-slate-500">
+                                <span class="shrink-0">Hasta:</span>
+                                <input type="date" x-model="historialHasta" @change="filtroHistorialRango = 'personalizado'; paginaHistorial = 1"
+                                       class="w-full sm:w-auto text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                        </div>
+
+                        <button x-show="historialDesde || historialHasta" @click="limpiarFechasHistorial()" class="text-xs text-rose-600 hover:underline font-medium self-end sm:self-auto px-1">Limpiar</button>
+                    </div>
+                </div>
+
+                <div class="md:overflow-x-auto">
+                    <table class="block md:table w-full text-left border-collapse">
+                        <tbody class="block md:table-row-group divide-y divide-slate-100 text-sm">
+                            <template x-for="turno in historialPaginado" :key="turno.id">
+                                <tr class="flex flex-wrap items-center justify-between gap-y-1 py-2.5 px-1 md:p-0 md:table-row hover:bg-slate-50/80 transition cursor-pointer"
+                                    @click="abrirTurno(turno)">
+                                    
+                                    <td class="order-1 block md:table-cell md:py-2.5 md:px-4 font-medium text-slate-600 whitespace-nowrap text-xs"
+                                        x-text="turno.fecha_display">
+                                    </td>
+                                    <td class="order-3 w-full md:w-auto block md:table-cell md:py-2.5 md:px-4 text-slate-800 md:text-slate-700 font-semibold md:font-medium text-xs"
+                                        x-text="turno.cliente_nombre">
+                                    </td>
+                                    <td class="order-4 w-full md:w-auto block md:table-cell md:py-2.5 md:px-4 text-slate-400 text-xs md:max-w-[180px] truncate"
+                                        x-text="turno.descripcion || '-'">
+                                    </td>
+                                    <td class="order-2 ml-auto md:ml-0 block md:table-cell md:py-2.5 md:px-4 text-right whitespace-nowrap">
+                                        <div class="inline-flex items-center justify-end gap-1.5 md:gap-2">
+                                            <button type="button"
+                                                title="Clic para cambiar estado rápido"
+                                                @click.stop="abrirCambioEstadoRapido(turno)"
+                                                :class="{
+                                                    'bg-emerald-50 text-emerald-700 border border-emerald-200/60': turno.estado === 'completado',
+                                                    'bg-rose-50 text-rose-700 border border-rose-200/60': turno.estado === 'ausente',
+                                                    'bg-slate-100 text-slate-600 border border-slate-200': turno.estado === 'cancelado'
+                                                }"
+                                                class="px-2 md:px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide inline-flex items-center gap-1 hover:ring-2 hover:ring-indigo-300 transition">
+                                                <span x-text="turno.estado_display"></span>
+                                                <span class="text-[10px] opacity-60">▾</span>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </template>
+
+                            <tr x-show="historialFiltrado.length === 0" class="block md:table-row">
+                                <td colspan="4" class="block md:table-cell py-6 text-center text-xs text-slate-400">
+                                    No hay turnos gestionados que coincidan con este filtro.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div x-show="totalPaginasHistorial > 1" class="mt-2 pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span class="text-slate-400">
+                        Página <strong class="text-slate-700" x-text="paginaHistorial"></strong> de <strong class="text-slate-700" x-text="totalPaginasHistorial"></strong>
+                    </span>
+                    <div class="inline-flex items-center gap-1">
+                        <button type="button" @click="paginaHistorial = Math.max(1, paginaHistorial - 1)" :disabled="paginaHistorial === 1"
+                                class="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium">
+                            Anterior
+                        </button>
+                        <template x-for="p in paginasVisibles(paginaHistorial, totalPaginasHistorial)" :key="p">
+                            <button type="button" @click="paginaHistorial = p"
+                                    :class="paginaHistorial === p ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'"
+                                    class="w-7 h-7 rounded-lg border font-semibold transition"
+                                    x-text="p"></button>
+                        </template>
+                        <button type="button" @click="paginaHistorial = Math.min(totalPaginasHistorial, paginaHistorial + 1)" :disabled="paginaHistorial === totalPaginasHistorial"
+                                class="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium">
+                            Siguiente
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div x-show="modalEstadoRapidoAbierto" class="fixed inset-0 bg-slate-900/40 backdrop-blur-[1px] flex items-start pt-3 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-50 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-4 sm:p-5 relative my-auto" @click.away="if(!guardando) modalEstadoRapidoAbierto = false">
+            <div class="flex justify-between items-center mb-2.5">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900">Actualizar Estado</h3>
+                    <p class="text-xs text-slate-500 truncate max-w-[230px]" x-text="turnoEstadoRapido.cliente_nombre"></p>
+                </div>
+                <button type="button" :disabled="guardando" @click="modalEstadoRapidoAbierto = false" class="text-slate-400 hover:text-slate-600 font-bold text-lg leading-none">&times;</button>
+            </div>
+
+            <form @submit.prevent="guardarEstadoRapido()" class="space-y-2.5">
+                <div>
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-1">Nuevo Estado</label>
+                    <select x-model="turnoEstadoRapido.estado" :disabled="guardando"
+                            class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm font-medium bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition">
+                        <option value="pendiente">Pendiente</option>
+                        <option value="reprogramado">Reprogramado</option>
+                        <option value="completado">Completado / Finalizado</option>
+                        <option value="ausente">Ausente</option>
+                        <option value="cancelado">Cancelado</option>
+                    </select>
+                </div>
+
+                <div x-show="turnoEstadoRapido.estado === 'reprogramado'" class="space-y-2.5 pt-2 border-t border-slate-100" style="display: none;">
+                    <div>
+                        <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-1">Nueva Fecha y Hora</label>
+                        <input type="datetime-local" x-model="turnoEstadoRapido.fecha_hora" :disabled="guardando"
+                               @wheel.prevent="turnoEstadoRapido.fecha_hora = ajustarFechaHora(turnoEstadoRapido.fecha_hora, $event.deltaY < 0 ? 15 : -15)"
+                               class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <div class="flex items-center justify-between gap-1 mt-1">
+                            <span class="text-[10px] text-slate-400">Ajuste rápido:</span>
+                            <div class="flex gap-1">
+                                <button type="button" @click="turnoEstadoRapido.fecha_hora = ajustarFechaHora(turnoEstadoRapido.fecha_hora, -60)" class="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 rounded">-1h</button>
+                                <button type="button" @click="turnoEstadoRapido.fecha_hora = ajustarFechaHora(turnoEstadoRapido.fecha_hora, -15)" class="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 rounded">-15m</button>
+                                <button type="button" @click="turnoEstadoRapido.fecha_hora = ajustarFechaHora(turnoEstadoRapido.fecha_hora, 15)" class="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 rounded">+15m</button>
+                                <button type="button" @click="turnoEstadoRapido.fecha_hora = ajustarFechaHora(turnoEstadoRapido.fecha_hora, 60)" class="px-1.5 py-0.5 text-[10px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 rounded">+1h</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-1">Motivo / Descripción (Opcional)</label>
+                        <textarea x-model="turnoEstadoRapido.descripcion" :disabled="guardando" rows="2" placeholder="Ej: Se pasa por pedido del paciente..."
+                                  class="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none resize-none"></textarea>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" :disabled="guardando" @click="modalEstadoRapidoAbierto = false" 
+                            class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
+                        Cancelar
+                    </button>
+                    <button type="submit" :disabled="guardando"
+                            class="bg-indigo-600 text-white text-xs font-semibold px-4 py-1.5 rounded-lg shadow hover:bg-indigo-700 disabled:opacity-50 transition"
+                            x-text="guardando ? 'Guardando...' : 'Aplicar Cambios'">
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div x-show="modalTurnoAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] flex items-start pt-3 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-50 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-4 sm:p-6 relative sm:my-auto" @click.away="if(!guardando) modalTurnoAbierto = false">
+            <div class="flex justify-between items-center mb-2.5 sm:mb-4">
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Agendar Nuevo Turno</h3>
+                <button type="button" :disabled="guardando" @click="modalTurnoAbierto = false" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">&times;</button>
+            </div>
+            
+            <form id="formCrearTurno" @submit.prevent="guardarTurnoNuevo()" class="space-y-2.5 sm:space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Seleccionar Paciente</label>
+                    <div class="flex gap-2">
+                        <select id="select-cliente-turno" name="cliente_id" x-model="clienteTurnoId" required class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                            <option value="">-- Seleccione un paciente --</option>
+                            {% for cliente in clientes %}
+                            <option value="{{ cliente.id }}">{{ cliente.apellido }}, {{ cliente.nombre }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="button" :disabled="guardando" @click="modalClienteAbierto = true" class="bg-slate-100 border border-slate-300 text-slate-700 px-3 py-1.5 sm:py-2 rounded-xl hover:bg-slate-200 font-medium text-xs sm:text-sm whitespace-nowrap">
+                            + Nuevo
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Fecha y Hora</label>
+                    <input type="datetime-local" name="fecha_hora" x-model="nuevaFechaHora"
+                           @wheel.prevent="nuevaFechaHora = ajustarFechaHora(nuevaFechaHora, $event.deltaY < 0 ? 15 : -15)"
+                           required class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <div class="flex items-center justify-between gap-1.5 mt-1">
+                        <span class="text-[11px] text-slate-400">Ajuste rápido:</span>
+                        <div class="flex gap-1">
+                            <button type="button" @click="nuevaFechaHora = ajustarFechaHora(nuevaFechaHora, -60)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">-1h</button>
+                            <button type="button" @click="nuevaFechaHora = ajustarFechaHora(nuevaFechaHora, -15)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">-15m</button>
+                            <button type="button" @click="nuevaFechaHora = ajustarFechaHora(nuevaFechaHora, 15)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">+15m</button>
+                            <button type="button" @click="nuevaFechaHora = ajustarFechaHora(nuevaFechaHora, 60)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">+1h</button>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Motivo / Descripción</label>
+                    <textarea name="descripcion" rows="2" class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2 sm:pt-3 border-t border-slate-100">
+                    <button type="button" :disabled="guardando" @click="modalTurnoAbierto = false" class="px-3.5 py-1.5 sm:py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-medium">Cancelar</button>
+                    <button type="submit" :disabled="guardando" 
+                            class="bg-indigo-600 text-white px-4 py-1.5 sm:py-2 rounded-xl hover:bg-indigo-700 text-xs sm:text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition"
+                            x-text="guardando ? 'Agendando...' : 'Agendar Turno'">
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div x-show="modalDetalleClienteAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-start pt-3 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-50 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-4 sm:p-6 relative sm:my-auto" @click.away="if(!guardando) modalDetalleClienteAbierto = false">
+            <div class="flex justify-between items-center mb-2 sm:mb-3">
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Detalle del Paciente</h3>
+                <button :disabled="guardando" @click="modalDetalleClienteAbierto = false" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">&times;</button>
+            </div>
+
+            <div x-show="!editandoCliente"
+                 :class="avisoEdicionCliente ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-slate-50 border-slate-200/80 text-slate-500'"
+                 class="mb-2.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-medium flex items-center gap-1.5 transition-colors">
+                <span>🔒</span>
+                <span>Para modificar, presioná <strong>"✏️ Editar Datos"</strong> abajo.</span>
+            </div>
+
+            <form @submit.prevent="guardarClienteExistente()" class="space-y-2 sm:space-y-3.5">
+                <div class="grid grid-cols-2 sm:grid-cols-1 gap-2 sm:gap-3.5">
+                    <div @click="notificarBloqueoCliente()">
+                        <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Nombre</label>
+                        <input type="text" x-model="clienteSeleccionado.nombre" :disabled="!editandoCliente || guardando" 
+                               class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition disabled:bg-slate-100/80 disabled:border-dashed disabled:border-slate-300 disabled:text-slate-500 disabled:opacity-75 disabled:cursor-not-allowed disabled:pointer-events-none">
+                    </div>
+                    <div @click="notificarBloqueoCliente()">
+                        <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Apellido</label>
+                        <input type="text" x-model="clienteSeleccionado.apellido" :disabled="!editandoCliente || guardando" 
+                               class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition disabled:bg-slate-100/80 disabled:border-dashed disabled:border-slate-300 disabled:text-slate-500 disabled:opacity-75 disabled:cursor-not-allowed disabled:pointer-events-none">
+                    </div>
+                </div>
+                <div @click="notificarBloqueoCliente()">
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Teléfono / WhatsApp</label>
+                    <input type="text" x-model="clienteSeleccionado.telefono" :disabled="!editandoCliente || guardando" 
+                           class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition disabled:bg-slate-100/80 disabled:border-dashed disabled:border-slate-300 disabled:text-slate-500 disabled:opacity-75 disabled:cursor-not-allowed disabled:pointer-events-none">
+                </div>
+                <div @click="notificarBloqueoCliente()">
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Correo Electrónico</label>
+                    <input type="email" x-model="clienteSeleccionado.correo" :disabled="!editandoCliente || guardando" 
+                           class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition disabled:bg-slate-100/80 disabled:border-dashed disabled:border-slate-300 disabled:text-slate-500 disabled:opacity-75 disabled:cursor-not-allowed disabled:pointer-events-none">
+                </div>
+
+                <div class="flex flex-wrap justify-between items-center pt-2.5 sm:pt-4 border-t border-slate-100 gap-2">
+                    <div class="flex items-center gap-2 sm:gap-3">
+                        <button type="button" :disabled="guardando" @click="editandoCliente = !editandoCliente; avisoEdicionCliente = false" 
+                                :class="avisoEdicionCliente && !editandoCliente ? 'ring-2 ring-indigo-500 bg-indigo-50 px-2.5 py-1.5 rounded-lg' : ''"
+                                class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition disabled:opacity-50"
+                                x-text="editandoCliente ? 'Cancelar edición' : '✏️ Editar Datos'"></button>
+
+                        <button type="button" x-show="!editandoCliente" :disabled="guardando" @click="agendarTurnoParaCliente()"
+                                class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg transition disabled:opacity-50">
+                            📅 Crear Turno
+                        </button>
+                    </div>
+                    
+                    <div class="flex gap-1.5 ml-auto">
+                        <button type="button" :disabled="guardando" @click="modalDetalleClienteAbierto = false" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl">Cerrar</button>
+                        <button type="submit" x-show="editandoCliente" :disabled="!hayCambiosCliente || guardando"
+                                class="bg-indigo-600 text-white text-xs font-semibold px-3.5 py-1.5 rounded-xl shadow hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                                x-text="guardando ? 'Guardando...' : 'Guardar'">
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div x-show="modalTurnoDetalleAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-start pt-3 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-50 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-4 sm:p-6 relative sm:my-auto" @click.away="if(!guardando) modalTurnoDetalleAbierto = false">
+            <div class="flex justify-between items-center mb-2 sm:mb-3">
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Detalle del Turno</h3>
+                <button :disabled="guardando" @click="modalTurnoDetalleAbierto = false" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">&times;</button>
+            </div>
+
+            <div x-show="!editandoTurno"
+                 :class="avisoEdicionTurno ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-slate-50 border-slate-200/80 text-slate-500'"
+                 class="mb-2.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-medium flex items-center gap-1.5 transition-colors">
+                <span>🔒</span>
+                <span>Para modificar este turno, presioná <strong>"✏️ Editar Turno"</strong> abajo.</span>
+            </div>
+
+            <form @submit.prevent="guardarTurnoEditado()" class="space-y-2 sm:space-y-3.5">
+                <div>
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Paciente</label>
+                    <input type="text" x-model="turnoSeleccionado.cliente_nombre" disabled 
+                           class="w-full border border-dashed border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-slate-100/80 text-slate-500 opacity-75 outline-none cursor-not-allowed">
+                </div>
+                <div @click="notificarBloqueoTurno()">
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Fecha y Hora</label>
+                    <input type="datetime-local" x-model="turnoSeleccionado.fecha_hora" :disabled="!editandoTurno || guardando" 
+                           @wheel="if(editandoTurno && !guardando) { $event.preventDefault(); turnoSeleccionado.fecha_hora = ajustarFechaHora(turnoSeleccionado.fecha_hora, $event.deltaY < 0 ? 15 : -15); }"
+                           class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition disabled:bg-slate-100/80 disabled:border-dashed disabled:border-slate-300 disabled:text-slate-500 disabled:opacity-75 disabled:cursor-not-allowed disabled:pointer-events-none">
+                    <div x-show="editandoTurno" class="flex items-center justify-between gap-1.5 mt-1">
+                        <span class="text-[11px] text-slate-400">Ajuste rápido:</span>
+                        <div class="flex gap-1">
+                            <button type="button" :disabled="guardando" @click="turnoSeleccionado.fecha_hora = ajustarFechaHora(turnoSeleccionado.fecha_hora, -60)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">-1h</button>
+                            <button type="button" :disabled="guardando" @click="turnoSeleccionado.fecha_hora = ajustarFechaHora(turnoSeleccionado.fecha_hora, -15)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">-15m</button>
+                            <button type="button" :disabled="guardando" @click="turnoSeleccionado.fecha_hora = ajustarFechaHora(turnoSeleccionado.fecha_hora, 15)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">+15m</button>
+                            <button type="button" :disabled="guardando" @click="turnoSeleccionado.fecha_hora = ajustarFechaHora(turnoSeleccionado.fecha_hora, 60)" class="px-2 py-0.5 text-[11px] font-semibold bg-slate-100 hover:bg-indigo-50 text-slate-600 border border-slate-200 rounded">+1h</button>
+                        </div>
+                    </div>
+                </div>
+                <div @click="notificarBloqueoTurno()">
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Estado</label>
+                    <select x-model="turnoSeleccionado.estado" :disabled="!editandoTurno || guardando"
+                            class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition disabled:bg-slate-100/80 disabled:border-dashed disabled:border-slate-300 disabled:text-slate-500 disabled:opacity-75 disabled:cursor-not-allowed disabled:pointer-events-none">
+                        <option value="pendiente">Pendiente</option>
+                        <option value="reprogramado">Reprogramado</option>
+                        <option value="completado">Completado / Finalizado</option>
+                        <option value="ausente">Ausente</option>
+                        <option value="cancelado">Cancelado</option>
+                    </select>
+                </div>
+                <div @click="notificarBloqueoTurno()">
+                    <label class="block text-[11px] font-semibold uppercase text-slate-400 mb-0.5 sm:mb-1">Descripción / Motivo</label>
+                    <textarea x-model="turnoSeleccionado.descripcion" :disabled="!editandoTurno || guardando" rows="2"
+                              class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none transition resize-none disabled:bg-slate-100/80 disabled:border-dashed disabled:border-slate-300 disabled:text-slate-500 disabled:opacity-75 disabled:cursor-not-allowed disabled:pointer-events-none"></textarea>
+                </div>
+
+                <div class="flex flex-wrap justify-between items-center pt-2.5 sm:pt-4 border-t border-slate-100 gap-2">
+                    <button type="button" :disabled="guardando" @click="abrirConfirmacionEliminar()" 
+                            title="Eliminar turno"
+                            class="text-slate-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 sm:p-2 rounded-xl transition disabled:opacity-50">
+                        🗑️
+                    </button>
+                    
+                    <div class="flex flex-wrap gap-1.5 sm:gap-2 items-center ml-auto">
+                        <button type="button" :disabled="guardando" @click="editandoTurno = !editandoTurno; avisoEdicionTurno = false" 
+                                :class="avisoEdicionTurno && !editandoTurno ? 'ring-2 ring-indigo-500' : ''"
+                                class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 disabled:opacity-50"
+                                x-text="editandoTurno ? 'Cancelar' : '✏️ Editar Turno'"></button>
+                        
+                        <button type="button" :disabled="guardando" @click="modalTurnoDetalleAbierto = false" class="px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl">Cerrar</button>
+                        
+                        <button type="submit" x-show="editandoTurno" :disabled="!hayCambiosTurno || guardando"
+                                class="bg-indigo-600 text-white text-xs font-semibold px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl shadow hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                                x-text="guardando ? 'Guardando...' : 'Guardar'">
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div x-show="modalConfirmarFinalizarAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-start pt-10 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-50 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-5 sm:p-6 relative text-center sm:my-auto" @click.away="if(!guardando) modalConfirmarFinalizarAbierto = false">
+            <div class="w-11 h-11 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-2.5 text-xl">
+                ✅
+            </div>
+            <h3 class="text-base font-bold text-slate-900 mb-1">¿Finalizar Turno?</h3>
+            <p class="text-xs text-slate-500 mb-5">El turno pasará a estado completado y dejará de mostrarse en los próximos turnos pendientes.</p>
+            <div class="flex gap-2 justify-center">
+                <button type="button" :disabled="guardando" @click="modalConfirmarFinalizarAbierto = false" class="px-4 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                    Cancelar
+                </button>
+                <button type="button" :disabled="guardando" @click="ejecutarFinalizacionDirecta()" class="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow transition disabled:opacity-50"
+                        x-text="guardando ? 'Finalizando...' : 'Sí, finalizar'">
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="modalConfirmarEliminarAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-start pt-10 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-50 overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl border border-rose-100 w-full max-w-sm p-5 sm:p-6 relative text-center sm:my-auto" @click.away="if(!guardando) modalConfirmarEliminarAbierto = false">
+            <div class="w-11 h-11 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-2.5 text-xl">
+                ⚠️
+            </div>
+            <h3 class="text-base font-bold text-slate-900 mb-1">¿Eliminar este turno permanentemente?</h3>
+            <p class="text-xs text-slate-500 mb-5">Esta acción <strong class="text-rose-600">no se puede deshacer</strong>. El turno se borrará por completo de la base de datos y perderás todo su registro histórico.</p>
+            <div class="flex gap-2 justify-center">
+                <button type="button" :disabled="guardando" @click="modalConfirmarEliminarAbierto = false" class="px-4 py-2 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition">
+                    Cancelar, conservar
+                </button>
+                <button type="button" :disabled="guardando" @click="ejecutarEliminacionDefinitiva()" class="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow transition disabled:opacity-50"
+                        x-text="guardando ? 'Eliminando...' : 'Sí, eliminar para siempre'">
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div x-show="modalClienteAbierto" class="fixed inset-0 bg-slate-900/50 backdrop-blur-[1px] flex items-start pt-3 sm:items-center sm:pt-4 justify-center p-2.5 sm:p-4 z-[9999] overflow-y-auto" style="display: none;">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-4 sm:p-6 sm:my-auto" @click.away.stop="if(!guardando) modalClienteAbierto = false">
+            <div class="flex justify-between items-center mb-2.5 sm:mb-4">
+                <h3 class="text-base sm:text-lg font-bold text-slate-900">Crear Nuevo Paciente</h3>
+                <button type="button" :disabled="guardando" @click.stop="modalClienteAbierto = false" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">&times;</button>
+            </div>
+            <form @submit.prevent="guardarClienteNuevo($el)" class="space-y-2.5 sm:space-y-4">
+                {% csrf_token %}
+                <div class="grid grid-cols-2 sm:grid-cols-1 gap-2 sm:gap-4">
+                    <div>
+                        <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Nombre</label>
+                        <input type="text" name="nombre" placeholder="Ej. Juan" required class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Apellido</label>
+                        <input type="text" name="apellido" placeholder="Ej. Pérez" required class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Teléfono</label>
+                    <input type="text" name="telefono" placeholder="Ej. 3415555555" class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+                <div>
+                    <label class="block text-xs sm:text-sm font-medium text-slate-700 mb-1">Correo electrónico</label>
+                    <input type="email" name="correo" placeholder="correo@ejemplo.com" class="w-full border border-slate-300 rounded-xl px-3 py-1.5 sm:py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                </div>
+                <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button type="button" :disabled="guardando" @click.stop="modalClienteAbierto = false" class="px-3.5 py-1.5 sm:py-2 text-slate-600 hover:bg-slate-100 rounded-xl text-xs sm:text-sm font-medium">Cancelar</button>
+                    <button type="submit" :disabled="guardando" 
+                            class="bg-indigo-600 text-white px-4 py-1.5 sm:py-2 rounded-xl hover:bg-indigo-700 text-xs sm:text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition"
+                            x-text="guardando ? 'Guardando...' : 'Guardar Paciente'">
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <div x-cloak
+        x-show="toastVisible"
+        x-transition:enter="transition ease-out duration-300"
+        x-transition:enter-start="translate-y-2 opacity-0"
+        x-transition:enter-end="translate-y-0 opacity-100"
+        x-transition:leave="transition ease-in duration-200"
+        x-transition:leave-start="opacity-100"
+        x-transition:leave-end="opacity-0"
+        class="fixed bottom-5 right-5 z-[99999] max-w-sm w-full bg-white shadow-xl rounded-2xl border border-slate-100 p-4 flex items-center gap-3">
+        <span class="text-xl">✅</span>
+        <div class="flex-1">
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-wider">Aviso</p>
+            <p class="text-sm font-semibold text-slate-800" x-text="toastMensaje"></p>
+        </div>
+    </div>
+
+</body>
+</html>
