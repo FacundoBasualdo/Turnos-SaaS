@@ -21,6 +21,7 @@ def enviar_correo_turno(turno, tipo="creacion"):
         return False
 
     negocio = turno.profesional.nombre_negocio
+    telefono = turno.profesional.telefono
     fecha_formateada = _formatear_fecha(turno.fecha_hora)
     motivo = f"\nMotivo: {turno.descripcion}" if turno.descripcion else ""
 
@@ -30,6 +31,7 @@ def enviar_correo_turno(turno, tipo="creacion"):
             f"Hola {cliente.nombre},\n\n"
             f"Tu turno con {negocio} ha sido agendado exitosamente para el día {fecha_formateada}.{motivo}\n\n"
             f"¡Te esperamos!"
+            f"WhatsApp {telefono}"
         )
     elif tipo == "reprogramado":
         subject = f"Turno Reprogramado - {negocio}"
@@ -38,6 +40,7 @@ def enviar_correo_turno(turno, tipo="creacion"):
             f"Te informamos que tu turno en {negocio} fue reprogramado.\n"
             f"Nueva fecha y hora: {fecha_formateada}.{motivo}\n\n"
             f"Si tenés algún inconveniente con este horario, por favor comunicate con nosotros."
+            f"WhatsApp {telefono}"
         )
     elif tipo == "cancelado":
         subject = f"Turno Cancelado - {negocio}"
@@ -45,6 +48,7 @@ def enviar_correo_turno(turno, tipo="creacion"):
             f"Hola {cliente.nombre},\n\n"
             f"Te avisamos que tu turno del día {fecha_formateada} en {negocio} ha sido cancelado.\n\n"
             f"Contactanos cuando quieras volver a agendar."
+            f"WhatsApp {telefono}"
         )
     elif tipo == "recordatorio":
         subject = f"Recordatorio de tu turno en {negocio}"
@@ -52,6 +56,7 @@ def enviar_correo_turno(turno, tipo="creacion"):
             f"Hola {cliente.nombre},\n\n"
             f"Te recordamos que tenés un turno agendado para mañana {fecha_formateada} en {negocio}.{motivo}\n\n"
             f"¡Te esperamos!"
+            f"WhatsApp {telefono}"
         )
     else:
         return False
@@ -72,26 +77,31 @@ def enviar_whatsapp_turno(turno, tipo="creacion"):
 
     negocio = turno.profesional.nombre_negocio
     fecha_formateada = _formatear_fecha(turno.fecha_hora)
+    telefono = turno.profesional.telefono
 
     if tipo == "creacion":
         mensaje = (
             f"Hola *{cliente.nombre}* 👋, te confirmamos tu turno en "
             f"*{negocio}* para el día *{fecha_formateada}*. ¡Te esperamos!"
+            f"WhatsApp {telefono}"
         )
     elif tipo == "reprogramado":
         mensaje = (
             f"Hola *{cliente.nombre}* 🔄, te avisamos que tu turno en *{negocio}* "
             f"fue reprogramado para el día *{fecha_formateada}*."
+            f"WhatsApp {telefono}"
         )
     elif tipo == "cancelado":
         mensaje = (
             f"Hola *{cliente.nombre}* ❌, te informamos que tu turno del "
             f"*{fecha_formateada}* en *{negocio}* fue cancelado."
+            f"WhatsApp {telefono}"
         )
     elif tipo == "recordatorio":
         mensaje = (
             f"Hola *{cliente.nombre}* ⏰, te recordamos tu turno para mañana "
             f"*{fecha_formateada}* en *{negocio}*."
+            f"WhatsApp {telefono}"
         )
     else:
         return False
@@ -101,4 +111,4 @@ def enviar_whatsapp_turno(turno, tipo="creacion"):
     print(f"Mensaje: {mensaje}")
     print(f"----------------------------------\n")
 
-    return True
+    return True 
